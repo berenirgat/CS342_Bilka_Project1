@@ -9,19 +9,19 @@
 #define WORD_MAX 128
 
 typedef struct {
-    int file_idx;    // 1..N
-    int line_no;     // 1.. (starts from 1)
+    int file_idx;   
+    int line_no;    
 } Occ;
 
 typedef struct {
     char word[WORD_MAX];
-    Occ *occ;        // dynamic array
+    Occ *occ;    
     size_t occ_sz;
     size_t occ_cap;
 } WordEntry;
 
 typedef struct {
-    WordEntry *arr;  // dynamic array
+    WordEntry *arr; 
     size_t sz;
     size_t cap;
 } WordMap;
@@ -58,7 +58,7 @@ static inline void occ_push(WordEntry *e, int file_idx, int line_no) {
     e->occ[e->occ_sz++] = (Occ){ .file_idx = file_idx, .line_no = line_no };
 }
 
-// Linear search is OK for starters; you can improve later.
+// simple linear search 
 static inline WordEntry* wm_get_or_add(WordMap *m, const char *w) {
     for (size_t i = 0; i < m->sz; i++) {
         if (strcmp(m->arr[i].word, w) == 0) return &m->arr[i];
@@ -77,7 +77,7 @@ static inline WordEntry* wm_get_or_add(WordMap *m, const char *w) {
     return e;
 }
 
-// Tokenize one line into words by whitespace; callback per token
+// spliting the line into words by whitespace
 typedef void (*token_cb)(const char *token, void *ctx);
 
 static inline void tokenize_ws(const char *line, token_cb cb, void *ctx) {
