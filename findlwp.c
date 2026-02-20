@@ -6,12 +6,6 @@
 #include <errno.h>
 #include "common.h"
 
-// --------- child -> parent wire format ----------
-// We'll send newline-separated records, each record:
-// WORD \t fileIdx \t lineNo \n
-// This keeps it simple. Parent parses lines.
-// IMPORTANT: child must write in chunks <= DataLen (requirement)  [oai_citation:1‡Project1.pdf](sediment://file_0000000042287246b6ce8f82c386fee9)
-
 typedef struct {
     int file_idx;
     int K;
@@ -24,14 +18,10 @@ typedef struct {
 static void add_token_cb(const char *tok, void *vctx) {
     ChildCtx *c = (ChildCtx*)vctx;
     if ((int)strlen(tok) >= c->K) {
-        // Line number handled outside; we store occurrences later in loop
-        // We'll push occ in the file-read loop (TODO below).
-        // This callback only filters tokens; keep it minimal.
         (void)c;
     }
 }
 
-// Helper: safe write <= DataLen
 static void write_all_chunked(int fd, const char *buf, size_t n, int DataLen) {
     size_t off = 0;
     while (off < n) {
@@ -46,7 +36,6 @@ static void write_all_chunked(int fd, const char *buf, size_t n, int DataLen) {
     }
 }
 
-// CHILD: read file, build map, then stream records to parent
 static void child_run(int file_idx, const char *filename, int K, int write_fd, int DataLen) {
     FILE *fp = fopen(filename, "r");
     if (!fp) die("fopen child");
@@ -59,9 +48,6 @@ static void child_run(int file_idx, const char *filename, int K, int write_fd, i
 
     while (getline(&line, &cap, fp) != -1) {
         line_no++;
-
-        // tokenize line; for each token >=K, add occurrence
-        // We'll do it inline (simple)
         const char *p = line;
         while (*p) {
             while (*p && isspace((unsigned char)*p)) p++;
@@ -79,7 +65,7 @@ static void child_run(int file_idx, const char *filename, int K, int write_fd, i
                 word[cpy] = '\0';
 
                 WordEntry *e = wm_get_or_add(&m, word);
-                occ_push(e, file_idx, line_no); // multiple in same line -> multiple pushes (ok)  [oai_citation:2‡Project1.pdf](sediment://file_0000000042287246b6ce8f82c386fee9)
+                occ_push(e, file_idx, line_no); 
             }
         }
     }
@@ -87,8 +73,6 @@ static void child_run(int file_idx, const char *filename, int K, int write_fd, i
     free(line);
     fclose(fp);
 
-    // stream to parent
-    // record: word \t file \t line \n
     for (size_t i = 0; i < m.sz; i++) {
         WordEntry *e = &m.arr[i];
         for (size_t j = 0; j < e->occ_sz; j++) {
@@ -104,7 +88,6 @@ static void child_run(int file_idx, const char *filename, int K, int write_fd, i
     _exit(0);
 }
 
-// Parent side: parse lines from pipes, merge into map
 typedef struct {
     int fd;
     int file_done;
@@ -142,14 +125,11 @@ static void buf_append(PipeState *ps, const char *data, size_t n) {
 }
 
 static void parent_consume_lines(PipeState *ps, WordMap *global) {
-    // parse full lines in ps->buf
     char *start = ps->buf;
     while (1) {
         char *nl = memchr(start, '\n', (ps->buf + ps->buf_sz) - start);
         if (!nl) break;
         *nl = '\0';
-
-        // line format: word\tfile\tline
         char *w = start;
         char *t1 = strchr(w, '\t');
         char *t2 = t1 ? strchr(t1 + 1, '\t') : NULL;
@@ -165,19 +145,16 @@ static void parent_consume_lines(PipeState *ps, WordMap *global) {
 
         start = nl + 1;
     }
-
-    // keep remainder (partial line) in buffer
     size_t rem = (ps->buf + ps->buf_sz) - start;
     memmove(ps->buf, start, rem);
     ps->buf_sz = rem;
     ps->buf[ps->buf_sz] = '\0';
 }
 
-// Sorting helpers
 static int cmp_wordentry(const void *a, const void *b) {
     const WordEntry *x = (const WordEntry*)a;
     const WordEntry *y = (const WordEntry*)b;
-    return strcmp(x->word, y->word); // case-sensitive  [oai_citation:3‡Project1.pdf](sediment://file_0000000042287246b6ce8f82c386fee9)
+    return strcmp(x->word, y->word); 
 }
 
 static int cmp_occ(const void *a, const void *b) {
@@ -188,10 +165,7 @@ static int cmp_occ(const void *a, const void *b) {
 }
 
 static void write_output(const char *outname, WordMap *m) {
-    // sort words
     qsort(m->arr, m->sz, sizeof(WordEntry), cmp_wordentry);
-
-    // sort occurrences per word
     for (size_t i = 0; i < m->sz; i++) {
         qsort(m->arr[i].occ, m->arr[i].occ_sz, sizeof(Occ), cmp_occ);
     }
@@ -238,9 +212,7 @@ int main(int argc, char **argv) {
         if (pid < 0) die("fork");
 
         if (pid == 0) {
-            // child
-            close(pipes[i][0]); // close read end
-            // close other pipes inherited
+            close(pipes[i][0]); 
             for (int j = 0; j < i; j++) {
                 close(pipes[j][0]);
                 close(pipes[j][1]);
@@ -251,9 +223,8 @@ int main(int argc, char **argv) {
             free(fname);
             _exit(0);
         } else {
-            // parent
             pids[i] = pid;
-            close(pipes[i][1]); // close write end
+            close(pipes[i][1]); 
         }
     }
 
@@ -261,7 +232,6 @@ int main(int argc, char **argv) {
     for (int i = 0; i < N; i++) ps_init(&ps[i], pipes[i][0]);
 
     WordMap global; wm_init(&global);
-
     int remaining = N;
 
     while (remaining > 0) {
@@ -290,12 +260,11 @@ int main(int argc, char **argv) {
             size_t want = (size_t)DataLen;
             if (want > sizeof(tmp)) want = sizeof(tmp);
 
-            ssize_t n = read(ps[i].fd, tmp, want); // read <= DataLen  [oai_citation:4‡Project1.pdf](sediment://file_0000000042287246b6ce8f82c386fee9)
+            ssize_t n = read(ps[i].fd, tmp, want); 
             if (n < 0) {
                 if (errno == EINTR) continue;
                 die("read");
             } else if (n == 0) {
-                // EOF
                 ps[i].file_done = 1;
                 remaining--;
                 close(ps[i].fd);
@@ -306,15 +275,12 @@ int main(int argc, char **argv) {
         }
     }
 
-    // wait children
     for (int i = 0; i < N; i++) {
         int st;
         waitpid(pids[i], &st, 0);
     }
 
-    // Write merged output
     write_output(outname, &global);
-
     for (int i = 0; i < N; i++) ps_free(&ps[i]);
     wm_free(&global);
     return 0;
