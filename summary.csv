@@ -1,0 +1,7 @@
+impl,N,mean_seconds
+proc,1,0.090000
+proc,2,0.170000
+proc,3,0.122000
+thread,1,0.088000
+thread,2,0.090000
+thread,3,0.080000
